@@ -1,0 +1,256 @@
+// Filters.cpp : 此文件包含 "main" 函数。程序执行将在此处开始并结束。
+//
+
+#include <iostream>
+#include<math.h>
+using namespace std;
+
+
+
+/**********************************************************************************/
+/**********************BOXCAR滤波********************************/
+/**********************************************************************************/
+void BOXCARFilter(const char* infile, const char* outfile, int band, int WinSize)
+{
+    //infle:输入文件的路径  outfile:指定的输出路径  band:影像指定的波段  WinSize:（方形）滤波窗口大小，奇数
+
+    FILE* P = fopen(infile, "rb");
+
+
+    //获取影像参数
+    int xSize = 1024;  //图像宽度
+    int ySize = 900;  //图像高度
+
+    //srcData为影像原始数据，dstData为处理后的数据
+    float* srcData = new float[xSize * ySize];
+    float* dstData = new float[xSize * ySize];
+
+    fread(srcData, sizeof(float), xSize * ySize, P);
+
+    fclose(P);
+
+
+
+    /*滤波处理部分*/
+    //将无法滤波的边缘数据复制过去
+    //WinOff:窗口大小的一半
+    int WinOff = (WinSize - 1) / 2;
+    for (int i = 0;i < ySize;i++)
+    {
+        if (i < WinOff)
+        {
+            for (int j = 0;j < xSize;j++)
+            {
+                dstData[i * xSize + j] = srcData[i * xSize + j];
+                dstData[(ySize - 1 - i) * xSize + j] = srcData[(ySize - 1 - i) * xSize + j];
+            }
+        }
+        if ((i >= WinOff) && (i < ySize - WinOff))
+        {
+            for (int j = 0;j < WinOff;j++)
+            {
+                dstData[i * xSize + j] = srcData[i * xSize + j];
+                dstData[i * xSize + ySize - j - 1] = srcData[i * xSize + ySize - j - 1];
+            }
+        }
+    }
+
+    //不是边缘数据，则进行滤波
+    //外面两层循坏保证对每个像元进行滤波，里面两层循环则是为了计算均值
+    for (int i = WinOff;i < ySize - WinOff;i++)
+    {
+        for (int j = WinOff;j < xSize - WinOff;j++)
+        {
+            float sum = 0;
+            for (int x = i - WinOff;x <= i + WinOff;x++)
+            {
+                for (int y = j - WinOff;y <= j + WinOff;y++)
+                {
+                    sum = sum + srcData[x * xSize + y];
+                }
+            }
+
+            //将窗口内像素平均值赋给窗口中心，即dstData
+            dstData[i * xSize + j] = sum / (WinSize * WinSize);
+        }
+    }
+
+        FILE* p = fopen(outfile, "wb");
+        fwrite(dstData, sizeof(float), xSize * ySize, p);
+        fclose(p);
+        delete[] srcData, dstData;
+
+
+
+    cout << "BOXCARFilter completed!" << endl;
+}
+
+
+
+/**********************************************************************************/
+/**********************freeman 分解********************************/
+/**********************************************************************************/
+void freeman_decomposition(const char* C[], const char* Odd, const char* Dbl, const char* Vol)
+{
+
+
+
+    //获取影像参数
+    int xSize = 1024;  //图像宽度
+    int ySize = 900;  //图像高度
+
+    float* DataC11 = new float[xSize * ySize];
+    float* DataC13_re = new float[xSize * ySize];
+    float* DataC13_im = new float[xSize * ySize];
+    float* DataC22 = new float[xSize * ySize];
+    float* DataC33 = new float[xSize * ySize];
+
+    float* DataOdd = new float[xSize * ySize];
+    float* DataDbl = new float[xSize * ySize];
+    float* DataVol = new float[xSize * ySize];
+
+    FILE* P11 = fopen(C[0], "rb");
+    FILE* P13_re = fopen(C[3], "rb");
+    FILE* P13_im = fopen(C[4], "rb");
+    FILE* P22 = fopen(C[5], "rb");
+    FILE* P33 = fopen(C[8], "rb");
+
+    fread(DataC11, sizeof(float), xSize * ySize, P11);
+    fread(DataC13_re, sizeof(float), xSize * ySize, P13_re);
+    fread(DataC13_im, sizeof(float), xSize * ySize, P13_im);
+    fread(DataC22, sizeof(float), xSize * ySize, P22);
+    fread(DataC33, sizeof(float), xSize * ySize, P33);
+
+    fclose(P11);fclose(P13_re);fclose(P13_im);fclose(P22);fclose(P33);
+
+    for (int i = 0;i < ySize;i++)
+    {
+        for (int j = 0;j < xSize;j++)
+        {
+            float fv = (3 / 2) * DataC22[i * xSize + j];
+            float fd = 0, fs = 0, alph = 0, belta = 0;
+            DataC11[i * xSize + j] = DataC11[i * xSize + j] - fv;
+            DataC33[i * xSize + j] = DataC33[i * xSize + j] - fv;
+            DataC13_re[i * xSize + j] = DataC13_re[i * xSize + j] - fv;
+
+            DataVol[i * xSize + j] = (8 / 3) * fv;
+            if (DataC13_re[i * xSize + j] > 0)
+            {
+                alph = -1;
+                fd = (DataC11[i * xSize + j] * DataC33[i * xSize + j] - DataC13_re[i * xSize + j] * DataC13_re[i * xSize + j] - DataC13_im[i * xSize + j] * DataC13_im[i * xSize + j])
+                    / (DataC11[i * xSize + j] + DataC33[i * xSize + j] + 2 * DataC13_re[i * xSize + j]);
+                fs = DataC33[i * xSize + j] - fd;
+                belta = sqrt((DataC13_re[i * xSize + j] + fd) * (DataC13_re[i * xSize + j] + fd) + DataC13_im[i * xSize + j] * DataC13_im[i * xSize + j]) / fs;
+
+            }
+
+            if (DataC13_re[i * xSize + j] <= 0)
+            {
+                belta = 1;
+                fs = (DataC11[i * xSize + j] * DataC33[i * xSize + j] - DataC13_re[i * xSize + j] * DataC13_re[i * xSize + j] - DataC13_im[i * xSize + j] * DataC13_im[i * xSize + j])
+                    / (DataC11[i * xSize + j] + DataC33[i * xSize + j] - 2 * DataC13_re[i * xSize + j]);
+                fd = DataC33[i * xSize + j] - fs;
+                alph = sqrt((DataC13_re[i * xSize + j] - fs) * (DataC13_re[i * xSize + j] - fs) + DataC13_im[i * xSize + j] * DataC13_im[i * xSize + j]) / fd;
+
+            }
+            DataOdd[i * xSize + j] = fs * (1 + belta * belta);
+            DataDbl[i * xSize + j] = fd * (1 + alph * alph);
+
+            if (DataVol[i * xSize + j] < 0)DataVol[i * xSize + j] = 0;
+            if (DataDbl[i * xSize + j] < 0)DataDbl[i * xSize + j] = 0;
+            if (DataOdd[i * xSize + j] < 0)DataOdd[i * xSize + j] = 0;
+            if (DataVol[i * xSize + j] > 255)DataVol[i * xSize + j] = 255;
+            if (DataDbl[i * xSize + j] > 255)DataVol[i * xSize + j] = 255;
+            if (DataOdd[i * xSize + j] > 255)DataVol[i * xSize + j] = 255;
+
+        }
+    }
+
+    FILE* p1 = fopen(Odd, "wb");
+    fwrite(DataOdd, sizeof(float), xSize * ySize, p1);
+    fclose(p1);
+    FILE* p2 = fopen(Dbl, "wb");
+    fwrite(DataDbl, sizeof(float), xSize * ySize, p2);
+    fclose(p2);
+    FILE* p3 = fopen(Vol, "wb");
+    fwrite(DataVol, sizeof(float), xSize * ySize, p3);
+    fclose(p3);
+
+
+
+
+    delete[] DataC11, DataC13_re, DataC13_im, DataC22, DataC33;
+    delete[] DataOdd, DataDbl, DataVol;
+    cout << endl;
+    cout << "freeman decomposition completed!";
+
+}
+
+
+
+int main()
+{
+
+    const char* C[9];
+    const char* Cfilter[9];
+    //C11
+    C[0] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3\\C11.bin";
+    Cfilter[0] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3filter\\C11.bin";
+    //C12
+    C[1] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3\\C12_real.bin";
+    Cfilter[1] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3filter\\C12_real.bin";
+
+    C[2] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3\\C12_imag.bin";
+    Cfilter[2] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3filter\\C12_imag.bin";
+    //C13
+    C[3] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3\\C13_real.bin";
+    Cfilter[3] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3filter\\C13_real.bin";
+
+    C[4] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3\\C13_imag.bin";
+    Cfilter[4] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3filter\\C13_imag.bin";
+    //C22
+    C[5] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3\\C22.bin";
+    Cfilter[5] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3filter\\C22.bin";
+    //C23
+    C[6] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3\\C23_real.bin";
+    Cfilter[6] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3filter\\C23_real.bin";
+
+    C[7] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3\\C23_imag.bin";
+    Cfilter[7] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3filter\\C23_imag.bin";
+    //C33
+    C[8] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3\\C33.bin";
+    Cfilter[8] = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\C3filter\\C33.bin";
+
+    const char* Odd = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\freeman\\Odd.bin";
+    const char* Dbl = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\freeman\\Dbl.bin";
+    const char* Vol = "C:\\Users\\zhuosang\\Desktop\\PolSAR\\DATA\\freeman\\Vol.bin";
+
+    int band = 1;int WinSize = 5;
+
+
+       BOXCARFilter(C[0], Cfilter[0], band, WinSize);
+       BOXCARFilter(C[1], Cfilter[1], band, WinSize);
+       BOXCARFilter(C[2], Cfilter[2], band, WinSize);
+       BOXCARFilter(C[3], Cfilter[3], band, WinSize);
+       BOXCARFilter(C[4], Cfilter[4], band, WinSize);
+       BOXCARFilter(C[5], Cfilter[5], band, WinSize);
+       BOXCARFilter(C[6], Cfilter[6], band, WinSize);
+       BOXCARFilter(C[7], Cfilter[7], band, WinSize);
+       BOXCARFilter(C[8], Cfilter[8], band, WinSize);
+
+       freeman_decomposition(Cfilter, Odd, Dbl, Vol);
+ 
+    
+    return 0;
+}
+
+// 运行程序: Ctrl + F5 或调试 >“开始执行(不调试)”菜单
+// 调试程序: F5 或调试 >“开始调试”菜单
+
+// 入门使用技巧: 
+//   1. 使用解决方案资源管理器窗口添加/管理文件
+//   2. 使用团队资源管理器窗口连接到源代码管理
+//   3. 使用输出窗口查看生成输出和其他消息
+//   4. 使用错误列表窗口查看错误
+//   5. 转到“项目”>“添加新项”以创建新的代码文件，或转到“项目”>“添加现有项”以将现有代码文件添加到项目
+//   6. 将来，若要再次打开此项目，请转到“文件”>“打开”>“项目”并选择 .sln 文件
